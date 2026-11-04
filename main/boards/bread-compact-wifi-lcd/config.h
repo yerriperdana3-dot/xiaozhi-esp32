@@ -1,3 +1,4 @@
+
 #ifndef _BOARD_CONFIG_H_
 #define _BOARD_CONFIG_H_
 
@@ -34,23 +35,25 @@
 #define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_NC
 
 // ====================================================================
-// MODIFIKASI PIN LCD ST7789 IPS 240x240 - TANPA CS (BOARD GENERIC 44-PIN)
-// ====================================================================
-#define DISPLAY_CS_PIN        GPIO_NUM_NC  // Tidak ada pin CS di LCD Anda
-#define DISPLAY_MOSI_PIN      GPIO_NUM_11  // Hubungkan ke SDA di LCD
-#define DISPLAY_CLK_PIN       GPIO_NUM_12  // Hubungkan ke SCL di LCD
-#define DISPLAY_DC_PIN        GPIO_NUM_13  // Hubungkan ke DC di LCD
-#define DISPLAY_RST_PIN       GPIO_NUM_14  // Hubungkan ke RES di LCD
-#define DISPLAY_BACKLIGHT_PIN GPIO_NUM_21  // Hubungkan ke BLK di LCD
+// LCD CHARACTER 12x2 I2C - ATHENA
+// ESP32-S3 N16R8 GENERIC 44-PIN
 // ====================================================================
 
+#define LCD_I2C_SDA_GPIO GPIO_NUM_21
+#define LCD_I2C_SCL_GPIO GPIO_NUM_47
+#define LCD_I2C_ADDRESS  0x27
+#define LCD_I2C_COLUMNS  12
+#define LCD_I2C_ROWS     2
+
 // ====================================================================
-// TRIK BAJAK CONFIG 240X320 SUPAYA SENSOR LAYAR TETAP MEMBACA 240X240
+// KONFIGURASI LAYAR ST7789 DAN LAYAR LAINNYA
+// DIPERTAHANKAN UNTUK KOMPATIBILITAS KONFIGURASI LAMA
 // ====================================================================
+
 #ifdef CONFIG_LCD_ST7789_240X320
 #define LCD_TYPE_ST7789_SERIAL
 #define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  240  // <--- Diubah paksa dari 320 menjadi 240
+#define DISPLAY_HEIGHT  240
 #define DISPLAY_MIRROR_X false
 #define DISPLAY_MIRROR_Y false
 #define DISPLAY_SWAP_XY false
@@ -65,7 +68,7 @@
 #ifdef CONFIG_LCD_ST7789_240X320_NO_IPS
 #define LCD_TYPE_ST7789_SERIAL
 #define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  240  // <--- Diubah paksa dari 320 menjadi 240
+#define DISPLAY_HEIGHT  240
 #define DISPLAY_MIRROR_X false
 #define DISPLAY_MIRROR_Y false
 #define DISPLAY_SWAP_XY false
@@ -77,9 +80,6 @@
 #define DISPLAY_SPI_MODE 0
 #endif
 
-// ====================================================================
-// SISA BLK KODE BERIKUTNYA TETAP UTUH AGAR COMPILER TIDAK EROR
-// ====================================================================
 #ifdef CONFIG_LCD_ST7789_170X320
 #define LCD_TYPE_ST7789_SERIAL
 #define DISPLAY_WIDTH   170
@@ -289,7 +289,10 @@
 #define DISPLAY_SPI_MODE 0
 #endif
 
-// A MCP Test: Control a lamp
+// ====================================================================
+// LAMP
+// ====================================================================
+
 #define LAMP_GPIO GPIO_NUM_18
 
 #endif // _BOARD_CONFIG_H_
