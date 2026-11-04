@@ -44,10 +44,13 @@
 #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_21  // Hubungkan ke BLK di LCD
 // ====================================================================
 
+// ====================================================================
+// TRIK BAJAK CONFIG 240X320 SUPAYA SENSOR LAYAR TETAP MEMBACA 240X240
+// ====================================================================
 #ifdef CONFIG_LCD_ST7789_240X320
 #define LCD_TYPE_ST7789_SERIAL
 #define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  320
+#define DISPLAY_HEIGHT  240  // <--- Diubah paksa dari 320 menjadi 240
 #define DISPLAY_MIRROR_X false
 #define DISPLAY_MIRROR_Y false
 #define DISPLAY_SWAP_XY false
@@ -62,7 +65,7 @@
 #ifdef CONFIG_LCD_ST7789_240X320_NO_IPS
 #define LCD_TYPE_ST7789_SERIAL
 #define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  320
+#define DISPLAY_HEIGHT  240  // <--- Diubah paksa dari 320 menjadi 240
 #define DISPLAY_MIRROR_X false
 #define DISPLAY_MIRROR_Y false
 #define DISPLAY_SWAP_XY false
@@ -74,6 +77,9 @@
 #define DISPLAY_SPI_MODE 0
 #endif
 
+// ====================================================================
+// SISA BLK KODE BERIKUTNYA TETAP UTUH AGAR COMPILER TIDAK EROR
+// ====================================================================
 #ifdef CONFIG_LCD_ST7789_170X320
 #define LCD_TYPE_ST7789_SERIAL
 #define DISPLAY_WIDTH   170
@@ -282,5 +288,8 @@
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
 #define DISPLAY_SPI_MODE 0
 #endif
+
+// A MCP Test: Control a lamp
+#define LAMP_GPIO GPIO_NUM_18
 
 #endif // _BOARD_CONFIG_H_
