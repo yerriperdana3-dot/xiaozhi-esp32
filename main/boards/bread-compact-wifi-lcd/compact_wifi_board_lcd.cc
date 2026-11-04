@@ -1,6 +1,7 @@
+
 #include "wifi_board.h"
 #include "codecs/no_audio_codec.h"
-#include "display/lcd_display.h"
+#include "display/display.h"
 #include "system_reset.h"
 #include "application.h"
 #include "button.h"
@@ -10,145 +11,202 @@
 #include "led/single_led.h"
 
 #include <esp_log.h>
+#include <esp_rom_sys.h>
 #include <driver/i2c_master.h>
-#include <esp_lcd_panel_vendor.h>
-#include <esp_lcd_panel_io.h>
-#include <esp_lcd_panel_ops.h>
-#include <driver/spi_common.h>
 
-#if defined(LCD_TYPE_ILI9341_SERIAL)
-#include "esp_lcd_ili9341.h"
-#endif
-
-#if defined(LCD_TYPE_GC9A01_SERIAL)
-#include "esp_lcd_gc9a01.h"
-static const gc9a01_lcd_init_cmd_t gc9107_lcd_init_cmds[] = {
-    //  {cmd, { data }, data_size, delay_ms}
-    {0xfe, (uint8_t[]){0x00}, 0, 0},
-    {0xef, (uint8_t[]){0x00}, 0, 0},
-    {0xb0, (uint8_t[]){0xc0}, 1, 0},
-    {0xb1, (uint8_t[]){0x80}, 1, 0},
-    {0xb2, (uint8_t[]){0x27}, 1, 0},
-    {0xb3, (uint8_t[]){0x13}, 1, 0},
-    {0xb6, (uint8_t[]){0x19}, 1, 0},
-    {0xb7, (uint8_t[]){0x05}, 1, 0},
-    {0xac, (uint8_t[]){0xc8}, 1, 0},
-    {0xab, (uint8_t[]){0x0f}, 1, 0},
-    {0x3a, (uint8_t[]){0x05}, 1, 0},
-    {0xb4, (uint8_t[]){0x04}, 1, 0},
-    {0xa8, (uint8_t[]){0x08}, 1, 0},
-    {0xb8, (uint8_t[]){0x08}, 1, 0},
-    {0xea, (uint8_t[]){0x02}, 1, 0},
-    {0xe8, (uint8_t[]){0x2A}, 1, 0},
-    {0xe9, (uint8_t[]){0x47}, 1, 0},
-    {0xe7, (uint8_t[]){0x5f}, 1, 0},
-    {0xc6, (uint8_t[]){0x21}, 1, 0},
-    {0xc7, (uint8_t[]){0x15}, 1, 0},
-    {0xf0,
-    (uint8_t[]){0x1D, 0x38, 0x09, 0x4D, 0x92, 0x2F, 0x35, 0x52, 0x1E, 0x0C,
-                0x04, 0x12, 0x14, 0x1f},
-    14, 0},
-    {0xf1,
-    (uint8_t[]){0x16, 0x40, 0x1C, 0x54, 0xA9, 0x2D, 0x2E, 0x56, 0x10, 0x0D,
-                0x0C, 0x1A, 0x14, 0x1E},
-    14, 0},
-    {0xf4, (uint8_t[]){0x00, 0x00, 0xFF}, 3, 0},
-    {0xba, (uint8_t[]){0xFF, 0xFF}, 2, 0},
-};
-#endif
- 
 #define TAG "CompactWifiBoardLCD"
+
+// LCD I2C PCF8574
+#define LCD_I2C_ADDRESS  0x27
+#define LCD_I2C_SDA      GPIO_NUM_21
+#define LCD_I2C_SCL      GPIO_NUM_47
+
+// PCF8574 bit mapping umum:
+// P0=RS, P1=RW, P2=EN, P3=Backlight
+// P4-P7 = D4-D7
+#define LCD_RS  0x01
+#define LCD_EN  0x04
+#define LCD_BL  0x08
 
 class CompactWifiBoardLCD : public WifiBoard {
 private:
- 
     Button boot_button_;
-    LcdDisplay* display_;
+    Display* display_ = nullptr;
 
-    void InitializeSpi() {
-        spi_bus_config_t buscfg = {};
-        buscfg.mosi_io_num = DISPLAY_MOSI_PIN;
-        buscfg.miso_io_num = GPIO_NUM_NC;
-        buscfg.sclk_io_num = DISPLAY_CLK_PIN;
-        buscfg.quadwp_io_num = GPIO_NUM_NC;
-        buscfg.quadhd_io_num = GPIO_NUM_NC;
-        buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
-        ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO));
+    i2c_master_bus_handle_t lcd_i2c_bus_ = nullptr;
+    i2c_master_dev_handle_t lcd_i2c_device_ = nullptr;
+
+    uint8_t lcd_backlight_ = LCD_BL;
+
+    esp_err_t LCD_WriteExpander(uint8_t data) {
+        return i2c_master_transmit(
+            lcd_i2c_device_,
+            &data,
+            1,
+            100
+        );
     }
 
-    void InitializeLcdDisplay() {
-        esp_lcd_panel_io_handle_t panel_io = nullptr;
-        esp_lcd_panel_handle_t panel = nullptr;
-        // 液晶屏控制IO初始化
-        ESP_LOGD(TAG, "Install panel IO");
-        esp_lcd_panel_io_spi_config_t io_config = {};
-        io_config.cs_gpio_num = DISPLAY_CS_PIN;
-        io_config.dc_gpio_num = DISPLAY_DC_PIN;
-        io_config.spi_mode = DISPLAY_SPI_MODE;
-        io_config.pclk_hz = 40 * 1000 * 1000;
-        io_config.trans_queue_depth = 10;
-        io_config.lcd_cmd_bits = 8;
-        io_config.lcd_param_bits = 8;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI3_HOST, &io_config, &panel_io));
+    void LCD_PulseEnable(uint8_t data) {
+        LCD_WriteExpander(data | LCD_EN);
+        esp_rom_delay_us(1);
 
-        // 初始化液晶屏驱动芯片
-        ESP_LOGD(TAG, "Install LCD driver");
-        esp_lcd_panel_dev_config_t panel_config = {};
-        panel_config.reset_gpio_num = DISPLAY_RST_PIN;
-        panel_config.rgb_ele_order = DISPLAY_RGB_ORDER;
-        panel_config.bits_per_pixel = 16;
-#if defined(LCD_TYPE_ILI9341_SERIAL)
-        ESP_ERROR_CHECK(esp_lcd_new_panel_ili9341(panel_io, &panel_config, &panel));
-#elif defined(LCD_TYPE_GC9A01_SERIAL)
-        ESP_ERROR_CHECK(esp_lcd_new_panel_gc9a01(panel_io, &panel_config, &panel));
-        gc9a01_vendor_config_t gc9107_vendor_config = {
-            .init_cmds = gc9107_lcd_init_cmds,
-            .init_cmds_size = sizeof(gc9107_lcd_init_cmds) / sizeof(gc9a01_lcd_init_cmd_t),
-        };        
-#else
-        ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(panel_io, &panel_config, &panel));
-#endif
-        
-        esp_lcd_panel_reset(panel);
+        LCD_WriteExpander(data & ~LCD_EN);
+        esp_rom_delay_us(50);
+    }
 
-        esp_lcd_panel_init(panel);
-        esp_lcd_panel_invert_color(panel, DISPLAY_INVERT_COLOR);
-        esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
-        esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
-#ifdef  LCD_TYPE_GC9A01_SERIAL
-        panel_config.vendor_config = &gc9107_vendor_config;
-#endif
-        display_ = new SpiLcdDisplay(panel_io, panel,
-                                    DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+    void LCD_Write4Bits(uint8_t value) {
+        uint8_t data = (value & 0xF0) | lcd_backlight_;
+
+        LCD_WriteExpander(data);
+        LCD_PulseEnable(data);
+    }
+
+    void LCD_Send(uint8_t value, bool data_mode) {
+        uint8_t mode = data_mode ? LCD_RS : 0;
+
+        uint8_t high = (value & 0xF0) | mode | lcd_backlight_;
+        uint8_t low = ((value << 4) & 0xF0) | mode | lcd_backlight_;
+
+        LCD_WriteExpander(high);
+        LCD_PulseEnable(high);
+
+        LCD_WriteExpander(low);
+        LCD_PulseEnable(low);
+    }
+
+    void LCD_Command(uint8_t command) {
+        LCD_Send(command, false);
+
+        if (command == 0x01 || command == 0x02) {
+            esp_rom_delay_us(2000);
+        }
+    }
+
+    void LCD_Print(const char* text) {
+        while (*text) {
+            LCD_Send(static_cast<uint8_t>(*text), true);
+            text++;
+        }
+    }
+
+    void LCD_SetCursor(uint8_t column, uint8_t row) {
+        static const uint8_t row_offsets[] = {
+            0x00,
+            0x40
+        };
+
+        if (row > 1) {
+            row = 1;
+        }
+
+        LCD_Command(0x80 | (column + row_offsets[row]));
+    }
+
+    void LCD_Clear() {
+        LCD_Command(0x01);
+    }
+
+    void InitializeLcdI2c() {
+        i2c_master_bus_config_t bus_config = {};
+
+        bus_config.i2c_port = I2C_NUM_0;
+        bus_config.sda_io_num = LCD_I2C_SDA;
+        bus_config.scl_io_num = LCD_I2C_SCL;
+        bus_config.clk_source = I2C_CLK_SRC_DEFAULT;
+        bus_config.glitch_ignore_cnt = 7;
+        bus_config.flags.enable_internal_pullup = true;
+
+        ESP_ERROR_CHECK(
+            i2c_new_master_bus(&bus_config, &lcd_i2c_bus_)
+        );
+
+        i2c_device_config_t device_config = {};
+
+        device_config.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+        device_config.device_address = LCD_I2C_ADDRESS;
+        device_config.scl_speed_hz = 100000;
+
+        ESP_ERROR_CHECK(
+            i2c_master_bus_add_device(
+                lcd_i2c_bus_,
+                &device_config,
+                &lcd_i2c_device_
+            )
+        );
+
+        ESP_LOGI(TAG, "LCD I2C device connected");
+    }
+
+    void InitializeCharacterLcd() {
+        esp_rom_delay_us(50000);
+
+        LCD_WriteExpander(lcd_backlight_);
+
+        // Inisialisasi HD44780 mode 4-bit
+        LCD_Write4Bits(0x30);
+        esp_rom_delay_us(4500);
+
+        LCD_Write4Bits(0x30);
+        esp_rom_delay_us(4500);
+
+        LCD_Write4Bits(0x30);
+        esp_rom_delay_us(150);
+
+        LCD_Write4Bits(0x20);
+
+        // 4-bit, 2 baris, font 5x8
+        LCD_Command(0x28);
+
+        // Display ON, cursor OFF
+        LCD_Command(0x0C);
+
+        // Entry mode
+        LCD_Command(0x06);
+
+        LCD_Clear();
+
+        // Tampilan awal Athena
+        LCD_SetCursor(0, 0);
+        LCD_Print("ATHENA AI");
+
+        LCD_SetCursor(0, 1);
+        LCD_Print("LCD READY");
+
+        ESP_LOGI(TAG, "Character LCD initialized");
     }
 
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
+
             if (app.GetDeviceState() == kDeviceStateStarting) {
                 EnterWifiConfigMode();
                 return;
             }
+
             app.ToggleChatState();
         });
     }
 
-    // 物联网初始化，添加对 AI 可见设备
+    // Inisialisasi perangkat IoT
     void InitializeTools() {
         static LampController lamp(LAMP_GPIO);
     }
 
 public:
-    CompactWifiBoardLCD() :
-        boot_button_(BOOT_BUTTON_GPIO) {
-        InitializeSpi();
-        InitializeLcdDisplay();
+    CompactWifiBoardLCD()
+        : boot_button_(BOOT_BUTTON_GPIO) {
+
+        InitializeLcdI2c();
+        InitializeCharacterLcd();
+
+        // Tidak menggunakan layar grafis SPI.
+        // LCD karakter bekerja sebagai display tambahan.
+        display_ = new NoDisplay();
+
         InitializeButtons();
         InitializeTools();
-        if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC) {
-            GetBacklight()->RestoreBrightness();
-        }
-        
     }
 
     virtual Led* GetLed() override {
@@ -158,11 +216,25 @@ public:
 
     virtual AudioCodec* GetAudioCodec() override {
 #ifdef AUDIO_I2S_METHOD_SIMPLEX
-        static NoAudioCodecSimplex audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-            AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT, AUDIO_I2S_MIC_GPIO_SCK, AUDIO_I2S_MIC_GPIO_WS, AUDIO_I2S_MIC_GPIO_DIN);
+        static NoAudioCodecSimplex audio_codec(
+            AUDIO_INPUT_SAMPLE_RATE,
+            AUDIO_OUTPUT_SAMPLE_RATE,
+            AUDIO_I2S_SPK_GPIO_BCLK,
+            AUDIO_I2S_SPK_GPIO_LRCK,
+            AUDIO_I2S_SPK_GPIO_DOUT,
+            AUDIO_I2S_MIC_GPIO_SCK,
+            AUDIO_I2S_MIC_GPIO_WS,
+            AUDIO_I2S_MIC_GPIO_DIN
+        );
 #else
-        static NoAudioCodecDuplex audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-            AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN);
+        static NoAudioCodecDuplex audio_codec(
+            AUDIO_INPUT_SAMPLE_RATE,
+            AUDIO_OUTPUT_SAMPLE_RATE,
+            AUDIO_I2S_GPIO_BCLK,
+            AUDIO_I2S_GPIO_WS,
+            AUDIO_I2S_GPIO_DOUT,
+            AUDIO_I2S_GPIO_DIN
+        );
 #endif
         return &audio_codec;
     }
@@ -172,10 +244,6 @@ public:
     }
 
     virtual Backlight* GetBacklight() override {
-        if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC) {
-            static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
-            return &backlight;
-        }
         return nullptr;
     }
 };
