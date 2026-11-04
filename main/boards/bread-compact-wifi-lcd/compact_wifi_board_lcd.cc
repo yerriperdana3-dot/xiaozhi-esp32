@@ -1,3 +1,4 @@
+
 #include "wifi_board.h"
 #include "codecs/no_audio_codec.h"
 #include "display/display.h"
@@ -14,12 +15,12 @@
 #include <driver/i2c_master.h>
 
 #include <cstdint>
+#include <cstring>
+#include <mutex>
+#include <string>
 
 #define TAG "CompactWifiBoardLCD"
 
-// PCF8574 LCD backpack
-// P0 = RS, P1 = RW, P2 = EN, P3 = Backlight
-// P4-P7 = D4-D7
 #define LCD_RS 0x01
 #define LCD_EN 0x04
 #define LCD_BL 0x08
@@ -35,16 +36,19 @@ private:
     uint8_t lcd_backlight_ = LCD_BL;
     bool lcd_ready_ = false;
 
+    std::mutex lcd_mutex_;
+
+    std::string current_status_ = "STANDBY";
+    std::string current_role_ = "ATHENA AI";
+    std::string current_message_;
+
     esp_err_t LCD_WriteExpander(uint8_t data) {
         if (lcd_i2c_device_ == nullptr) {
             return ESP_ERR_INVALID_STATE;
         }
 
         return i2c_master_transmit(
-            lcd_i2c_device_,
-            &data,
-            1,
-            100
+            lcd_i2c_device_, &data, 1, 100
         );
     }
 
@@ -58,7 +62,6 @@ private:
 
     void LCD_Write4Bits(uint8_t value) {
         uint8_t data = (value & 0xF0) | lcd_backlight_;
-
         LCD_WriteExpander(data);
         LCD_PulseEnable(data);
     }
@@ -66,8 +69,11 @@ private:
     void LCD_Send(uint8_t value, bool data_mode) {
         uint8_t mode = data_mode ? LCD_RS : 0;
 
-        uint8_t high = (value & 0xF0) | mode | lcd_backlight_;
-        uint8_t low = ((value << 4) & 0xF0) | mode | lcd_backlight_;
+        uint8_t high =
+            (value & 0xF0) | mode | lcd_backlight_;
+
+        uint8_t low =
+            ((value << 4) & 0xF0) | mode | lcd_backlight_;
 
         LCD_PulseEnable(high);
         LCD_PulseEnable(low);
@@ -82,9 +88,7 @@ private:
     }
 
     void LCD_Print(const char* text) {
-        if (text == nullptr) {
-            return;
-        }
+        if (text == nullptr) return;
 
         while (*text) {
             LCD_Send(static_cast<uint8_t>(*text), true);
@@ -93,24 +97,56 @@ private:
     }
 
     void LCD_SetCursor(uint8_t column, uint8_t row) {
-        static const uint8_t row_offsets[] = {
-            0x00,
-            0x40
-        };
+        static const uint8_t row_offsets[] = {0x00, 0x40};
 
-        if (row >= LCD_I2C_ROWS) {
-            row = LCD_I2C_ROWS - 1;
-        }
-
-        if (column >= LCD_I2C_COLUMNS) {
-            column = LCD_I2C_COLUMNS - 1;
-        }
+        if (row > 1) row = 1;
+        if (column > 11) column = 11;
 
         LCD_Command(0x80 | (column + row_offsets[row]));
     }
 
     void LCD_Clear() {
         LCD_Command(0x01);
+    }
+
+    void LCD_PrintLine(uint8_t row, const std::string& text) {
+        LCD_SetCursor(0, row);
+
+        for (int i = 0; i < 12; i++) {
+            char c = ' ';
+
+            if (i < static_cast<int>(text.size())) {
+                unsigned char ch =
+                    static_cast<unsigned char>(text[i]);
+
+                // LCD karakter standar hanya menerima ASCII.
+                c = (ch >= 32 && ch <= 126)
+                    ? static_cast<char>(ch)
+                    : '?';
+            }
+
+            LCD_Send(static_cast<uint8_t>(c), true);
+        }
+    }
+
+    void LCD_Render(const std::string& first,
+                    const std::string& second) {
+        if (!lcd_ready_) return;
+
+        LCD_PrintLine(0, first);
+        LCD_PrintLine(1, second);
+    }
+
+    std::string ShortText(const std::string& text) {
+        if (text.size() <= 12) return text;
+        return text.substr(0, 12);
+    }
+
+    void RenderCurrentMessage() {
+        LCD_Render(
+            ShortText(current_role_),
+            ShortText(current_message_)
+        );
     }
 
     bool InitializeLcdI2c() {
@@ -124,12 +160,11 @@ private:
         bus_config.flags.enable_internal_pullup = true;
 
         esp_err_t err = i2c_new_master_bus(
-            &bus_config,
-            &lcd_i2c_bus_
+            &bus_config, &lcd_i2c_bus_
         );
 
         if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Gagal membuat I2C bus: %s",
+            ESP_LOGE(TAG, "I2C bus gagal: %s",
                      esp_err_to_name(err));
             return false;
         }
@@ -147,39 +182,27 @@ private:
         );
 
         if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Gagal menambahkan LCD I2C: %s",
+            ESP_LOGE(TAG, "LCD I2C gagal: %s",
                      esp_err_to_name(err));
 
             i2c_del_master_bus(lcd_i2c_bus_);
             lcd_i2c_bus_ = nullptr;
-
             return false;
         }
 
-        ESP_LOGI(
-            TAG,
-            "LCD I2C siap: SDA=%d, SCL=%d, Address=0x%02X",
-            LCD_I2C_SDA_GPIO,
-            LCD_I2C_SCL_GPIO,
-            LCD_I2C_ADDRESS
-        );
-
+        ESP_LOGI(TAG, "LCD I2C siap");
         return true;
     }
 
     bool InitializeCharacterLcd() {
-        if (lcd_i2c_device_ == nullptr) {
-            return false;
-        }
+        if (lcd_i2c_device_ == nullptr) return false;
 
         esp_rom_delay_us(50000);
 
         if (LCD_WriteExpander(lcd_backlight_) != ESP_OK) {
-            ESP_LOGE(TAG, "LCD tidak merespons");
             return false;
         }
 
-        // Inisialisasi HD44780 mode 4-bit
         LCD_Write4Bits(0x30);
         esp_rom_delay_us(4500);
 
@@ -191,26 +214,16 @@ private:
 
         LCD_Write4Bits(0x20);
 
-        // Mode 4-bit, 2 baris, font 5x8
         LCD_Command(0x28);
-
-        // Display ON, cursor OFF
         LCD_Command(0x0C);
-
-        // Entry mode
         LCD_Command(0x06);
-
         LCD_Clear();
 
-        // Tampilan awal Athena
-        LCD_SetCursor(0, 0);
-        LCD_Print("ATHENA AI");
+        lcd_ready_ = true;
 
-        LCD_SetCursor(0, 1);
-        LCD_Print("LCD READY");
+        LCD_Render("ATHENA AI", "STANDBY");
 
-        ESP_LOGI(TAG, "LCD karakter berhasil diinisialisasi");
-
+        ESP_LOGI(TAG, "LCD karakter siap");
         return true;
     }
 
@@ -231,23 +244,117 @@ private:
         static LampController lamp(LAMP_GPIO);
     }
 
+    // Implementasi Display untuk LCD karakter
+    class CharacterLcdDisplay : public Display {
+    private:
+        CompactWifiBoardLCD* board_;
+
+    public:
+        explicit CharacterLcdDisplay(CompactWifiBoardLCD* board)
+            : board_(board) {}
+
+        bool Lock(int timeout_ms = 0) override {
+            (void)timeout_ms;
+            board_->lcd_mutex_.lock();
+            return true;
+        }
+
+        void Unlock() override {
+            board_->lcd_mutex_.unlock();
+        }
+
+        void SetStatus(const char* status) override {
+            DisplayLockGuard lock(this);
+            if (!lock) return;
+
+            std::string value =
+                (status != nullptr) ? status : "READY";
+
+            board_->current_status_ = value;
+            board_->current_role_ = "ATHENA AI";
+            board_->current_message_ = value;
+
+            board_->LCD_Render(
+                board_->ShortText("ATHENA AI"),
+                board_->ShortText(value)
+            );
+        }
+
+        void ShowNotification(
+            const char* notification,
+            int duration_ms = 3000
+        ) override {
+            (void)duration_ms;
+
+            DisplayLockGuard lock(this);
+            if (!lock) return;
+
+            std::string value =
+                (notification != nullptr)
+                ? notification : "";
+
+            board_->current_role_ = "NOTIFICATION";
+            board_->current_message_ = value;
+
+            board_->LCD_Render(
+                "NOTIFICATION",
+                board_->ShortText(value)
+            );
+        }
+
+        void SetChatMessage(
+            const char* role,
+            const char* content
+        ) override {
+            DisplayLockGuard lock(this);
+            if (!lock) return;
+
+            std::string role_text =
+                (role != nullptr) ? role : "";
+
+            std::string content_text =
+                (content != nullptr) ? content : "";
+
+            if (role_text == "user") {
+                board_->current_role_ = "YOU:";
+            } else if (role_text == "assistant") {
+                board_->current_role_ = "ATHENA:";
+            } else {
+                board_->current_role_ = "SYSTEM:";
+            }
+
+            board_->current_message_ = content_text;
+
+            board_->LCD_Render(
+                board_->ShortText(board_->current_role_),
+                board_->ShortText(board_->current_message_)
+            );
+        }
+
+        void ClearChatMessages() override {
+            DisplayLockGuard lock(this);
+            if (!lock) return;
+
+            board_->current_role_ = "ATHENA AI";
+            board_->current_message_ = "STANDBY";
+
+            board_->LCD_Render("ATHENA AI", "STANDBY");
+        }
+    };
+
 public:
     CompactWifiBoardLCD()
         : boot_button_(BOOT_BUTTON_GPIO) {
 
-        // LCD karakter I2C menggantikan layar grafis SPI
-        display_ = new NoDisplay();
-
-        // Inisialisasi LCD
         if (InitializeLcdI2c()) {
-            lcd_ready_ = InitializeCharacterLcd();
+            InitializeCharacterLcd();
         }
 
+        // Ganti NoDisplay dengan display LCD karakter.
+        display_ = new CharacterLcdDisplay(this);
+
         if (!lcd_ready_) {
-            ESP_LOGW(
-                TAG,
-                "LCD tidak aktif, firmware tetap dilanjutkan"
-            );
+            ESP_LOGW(TAG, "LCD tidak aktif");
         }
 
         InitializeButtons();
