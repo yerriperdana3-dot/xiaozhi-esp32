@@ -401,3 +401,4 @@ public:
 };
 
 DECLARE_BOARD(CompactWifiBoardLCD);
+
