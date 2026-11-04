@@ -13,19 +13,16 @@
 #include <esp_rom_sys.h>
 #include <driver/i2c_master.h>
 
+#include <cstdint>
+
 #define TAG "CompactWifiBoardLCD"
 
-// LCD I2C PCF8574
-#define LCD_I2C_ADDRESS  0x27
-#define LCD_I2C_SDA      GPIO_NUM_21
-#define LCD_I2C_SCL      GPIO_NUM_47
-
-// PCF8574 bit mapping umum:
-// P0=RS, P1=RW, P2=EN, P3=Backlight
+// PCF8574 LCD backpack
+// P0 = RS, P1 = RW, P2 = EN, P3 = Backlight
 // P4-P7 = D4-D7
-#define LCD_RS  0x01
-#define LCD_EN  0x04
-#define LCD_BL  0x08
+#define LCD_RS 0x01
+#define LCD_EN 0x04
+#define LCD_BL 0x08
 
 class CompactWifiBoardLCD : public WifiBoard {
 private:
@@ -36,8 +33,13 @@ private:
     i2c_master_dev_handle_t lcd_i2c_device_ = nullptr;
 
     uint8_t lcd_backlight_ = LCD_BL;
+    bool lcd_ready_ = false;
 
     esp_err_t LCD_WriteExpander(uint8_t data) {
+        if (lcd_i2c_device_ == nullptr) {
+            return ESP_ERR_INVALID_STATE;
+        }
+
         return i2c_master_transmit(
             lcd_i2c_device_,
             &data,
@@ -67,10 +69,7 @@ private:
         uint8_t high = (value & 0xF0) | mode | lcd_backlight_;
         uint8_t low = ((value << 4) & 0xF0) | mode | lcd_backlight_;
 
-        LCD_WriteExpander(high);
         LCD_PulseEnable(high);
-
-        LCD_WriteExpander(low);
         LCD_PulseEnable(low);
     }
 
@@ -83,6 +82,10 @@ private:
     }
 
     void LCD_Print(const char* text) {
+        if (text == nullptr) {
+            return;
+        }
+
         while (*text) {
             LCD_Send(static_cast<uint8_t>(*text), true);
             text++;
@@ -95,8 +98,12 @@ private:
             0x40
         };
 
-        if (row > 1) {
-            row = 1;
+        if (row >= LCD_I2C_ROWS) {
+            row = LCD_I2C_ROWS - 1;
+        }
+
+        if (column >= LCD_I2C_COLUMNS) {
+            column = LCD_I2C_COLUMNS - 1;
         }
 
         LCD_Command(0x80 | (column + row_offsets[row]));
@@ -106,19 +113,26 @@ private:
         LCD_Command(0x01);
     }
 
-    void InitializeLcdI2c() {
+    bool InitializeLcdI2c() {
         i2c_master_bus_config_t bus_config = {};
 
         bus_config.i2c_port = I2C_NUM_0;
-        bus_config.sda_io_num = LCD_I2C_SDA;
-        bus_config.scl_io_num = LCD_I2C_SCL;
+        bus_config.sda_io_num = LCD_I2C_SDA_GPIO;
+        bus_config.scl_io_num = LCD_I2C_SCL_GPIO;
         bus_config.clk_source = I2C_CLK_SRC_DEFAULT;
         bus_config.glitch_ignore_cnt = 7;
         bus_config.flags.enable_internal_pullup = true;
 
-        ESP_ERROR_CHECK(
-            i2c_new_master_bus(&bus_config, &lcd_i2c_bus_)
+        esp_err_t err = i2c_new_master_bus(
+            &bus_config,
+            &lcd_i2c_bus_
         );
+
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Gagal membuat I2C bus: %s",
+                     esp_err_to_name(err));
+            return false;
+        }
 
         i2c_device_config_t device_config = {};
 
@@ -126,21 +140,44 @@ private:
         device_config.device_address = LCD_I2C_ADDRESS;
         device_config.scl_speed_hz = 100000;
 
-        ESP_ERROR_CHECK(
-            i2c_master_bus_add_device(
-                lcd_i2c_bus_,
-                &device_config,
-                &lcd_i2c_device_
-            )
+        err = i2c_master_bus_add_device(
+            lcd_i2c_bus_,
+            &device_config,
+            &lcd_i2c_device_
         );
 
-        ESP_LOGI(TAG, "LCD I2C device connected");
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Gagal menambahkan LCD I2C: %s",
+                     esp_err_to_name(err));
+
+            i2c_del_master_bus(lcd_i2c_bus_);
+            lcd_i2c_bus_ = nullptr;
+
+            return false;
+        }
+
+        ESP_LOGI(
+            TAG,
+            "LCD I2C siap: SDA=%d, SCL=%d, Address=0x%02X",
+            LCD_I2C_SDA_GPIO,
+            LCD_I2C_SCL_GPIO,
+            LCD_I2C_ADDRESS
+        );
+
+        return true;
     }
 
-    void InitializeCharacterLcd() {
+    bool InitializeCharacterLcd() {
+        if (lcd_i2c_device_ == nullptr) {
+            return false;
+        }
+
         esp_rom_delay_us(50000);
 
-        LCD_WriteExpander(lcd_backlight_);
+        if (LCD_WriteExpander(lcd_backlight_) != ESP_OK) {
+            ESP_LOGE(TAG, "LCD tidak merespons");
+            return false;
+        }
 
         // Inisialisasi HD44780 mode 4-bit
         LCD_Write4Bits(0x30);
@@ -154,7 +191,7 @@ private:
 
         LCD_Write4Bits(0x20);
 
-        // 4-bit, 2 baris, font 5x8
+        // Mode 4-bit, 2 baris, font 5x8
         LCD_Command(0x28);
 
         // Display ON, cursor OFF
@@ -172,7 +209,9 @@ private:
         LCD_SetCursor(0, 1);
         LCD_Print("LCD READY");
 
-        ESP_LOGI(TAG, "Character LCD initialized");
+        ESP_LOGI(TAG, "LCD karakter berhasil diinisialisasi");
+
+        return true;
     }
 
     void InitializeButtons() {
@@ -188,7 +227,6 @@ private:
         });
     }
 
-    // Inisialisasi perangkat IoT
     void InitializeTools() {
         static LampController lamp(LAMP_GPIO);
     }
@@ -197,12 +235,20 @@ public:
     CompactWifiBoardLCD()
         : boot_button_(BOOT_BUTTON_GPIO) {
 
-        InitializeLcdI2c();
-        InitializeCharacterLcd();
-
-        // Tidak menggunakan layar grafis SPI.
-        // LCD karakter bekerja sebagai display tambahan.
+        // LCD karakter I2C menggantikan layar grafis SPI
         display_ = new NoDisplay();
+
+        // Inisialisasi LCD
+        if (InitializeLcdI2c()) {
+            lcd_ready_ = InitializeCharacterLcd();
+        }
+
+        if (!lcd_ready_) {
+            ESP_LOGW(
+                TAG,
+                "LCD tidak aktif, firmware tetap dilanjutkan"
+            );
+        }
 
         InitializeButtons();
         InitializeTools();
@@ -235,6 +281,7 @@ public:
             AUDIO_I2S_GPIO_DIN
         );
 #endif
+
         return &audio_codec;
     }
 
