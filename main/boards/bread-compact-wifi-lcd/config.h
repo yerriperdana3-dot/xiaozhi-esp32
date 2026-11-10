@@ -1,4 +1,3 @@
-
 #ifndef _BOARD_CONFIG_H_
 #define _BOARD_CONFIG_H_
 
@@ -43,29 +42,20 @@
 #define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_NC
 
 // ============================================================
-// ATHENA OLED SH1106 - I2C 128x64
+// ATHENA CHARACTER LCD 12x2 - I2C PCF8574
 // ESP32-S3 N16R8 GENERIC 44-PIN
 // ============================================================
 
-// I2C PIN CONFIGURATION
-#define OLED_I2C_SDA_GPIO GPIO_NUM_41
-#define OLED_I2C_SCL_GPIO GPIO_NUM_42
+#define LCD_I2C_SDA_GPIO GPIO_NUM_21
+#define LCD_I2C_SCL_GPIO GPIO_NUM_47
 
-// OLED DISPLAY CONFIGURATION
-#define OLED_I2C_ADDRESS  0x3C
-#define OLED_WIDTH        128
-#define OLED_HEIGHT       64
-
-// DISPLAY ORIENTATION
-#define DISPLAY_MIRROR_X  false
-#define DISPLAY_MIRROR_Y  false
-
-// OLED CONTROLLER
-#define SH1106
+#define LCD_I2C_ADDRESS  0x27
+#define LCD_I2C_COLUMNS  12
+#define LCD_I2C_ROWS     2
 
 // ============================================================
 // LEGACY GRAPHIC LCD CONFIGURATION
-// Dinonaktifkan karena Athena menggunakan OLED SH1106.
+// Dinonaktifkan karena Athena menggunakan LCD karakter I2C.
 // ============================================================
 
 #if 0
