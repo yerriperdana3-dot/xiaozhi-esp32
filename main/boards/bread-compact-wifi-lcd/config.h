@@ -1,4 +1,3 @@
-
 #ifndef _BOARD_CONFIG_H_
 #define _BOARD_CONFIG_H_
 
@@ -6,7 +5,6 @@
 
 // ============================================================
 // AUDIO CONFIGURATION
-// ESP32-S3 N16R8
 // ============================================================
 
 #define AUDIO_INPUT_SAMPLE_RATE  16000
@@ -16,12 +14,10 @@
 
 #ifdef AUDIO_I2S_METHOD_SIMPLEX
 
-// INMP441 - Microphone
 #define AUDIO_I2S_MIC_GPIO_WS   GPIO_NUM_4
 #define AUDIO_I2S_MIC_GPIO_SCK  GPIO_NUM_5
 #define AUDIO_I2S_MIC_GPIO_DIN  GPIO_NUM_6
 
-// MAX98357A - Speaker Amplifier
 #define AUDIO_I2S_SPK_GPIO_DOUT GPIO_NUM_7
 #define AUDIO_I2S_SPK_GPIO_BCLK GPIO_NUM_15
 #define AUDIO_I2S_SPK_GPIO_LRCK GPIO_NUM_16
@@ -46,37 +42,21 @@
 #define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_NC
 
 // ============================================================
-// ATHENA OLED 1.3 INCH - I2C 128x64
-// ESP32-S3 N16R8
+// ATHENA OLED SH1106 - I2C 128x64
+// ESP32-S3 N16R8 GENERIC 44-PIN
 // ============================================================
 
 #define DISPLAY_SDA_PIN GPIO_NUM_41
 #define DISPLAY_SCL_PIN GPIO_NUM_42
 
-#define DISPLAY_WIDTH  128
+#define DISPLAY_WIDTH   128
+#define DISPLAY_HEIGHT  64
 
-#if CONFIG_OLED_SSD1306_128X32
+#define DISPLAY_MIRROR_X false
+#define DISPLAY_MIRROR_Y false
 
-#define DISPLAY_HEIGHT 32
-
-#elif CONFIG_OLED_SSD1306_128X64
-
-#define DISPLAY_HEIGHT 64
-
-#elif CONFIG_OLED_SH1106_128X64
-
-#define DISPLAY_HEIGHT 64
+// SH1106 DRIVER SELECTION
 #define SH1106
-
-#else
-
-#error "OLED display type is not selected in menuconfig"
-
-#endif
-
-// Orientasi layar
-#define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_Y true
 
 // ============================================================
 // LAMP
