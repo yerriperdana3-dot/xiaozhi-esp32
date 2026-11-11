@@ -46,13 +46,16 @@
 // ESP32-S3 N16R8 GENERIC 44-PIN
 // ============================================================
 
-#define OLED_I2C_SDA_GPIO GPIO_NUM_41
-#define OLED_I2C_SCL_GPIO GPIO_NUM_42
+#define DISPLAY_SDA_PIN GPIO_NUM_41
+#define DISPLAY_SCL_PIN GPIO_NUM_42
+
+#define DISPLAY_WIDTH  128
+#define DISPLAY_HEIGHT 64
+
+#define DISPLAY_MIRROR_X false
+#define DISPLAY_MIRROR_Y false
 
 #define OLED_I2C_ADDRESS 0x3C
-
-#define OLED_WIDTH  128
-#define OLED_HEIGHT 64
 
 // ============================================================
 // LEGACY GRAPHIC LCD CONFIGURATION
@@ -60,8 +63,7 @@
 
 #if 0
 
-// Seluruh konfigurasi LCD TFT lama tetap disimpan
-// tetapi tidak digunakan oleh Athena.
+// Konfigurasi TFT lama dinonaktifkan.
 
 #endif
 
