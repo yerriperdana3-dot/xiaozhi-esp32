@@ -18,11 +18,9 @@
 
 #define TAG "CompactWifiBoardLCD"
 
-#define OLED_WIDTH  128
-#define OLED_HEIGHT 64
-
 class CompactWifiBoardLCD : public WifiBoard {
 private:
+
     Button boot_button_;
 
     Display* display_ = nullptr;
@@ -36,11 +34,12 @@ private:
     // =====================================================
 
     void InitializeDisplayI2c() {
+
         i2c_master_bus_config_t bus_config = {};
 
         bus_config.i2c_port = I2C_NUM_0;
-        bus_config.sda_io_num = LCD_I2C_SDA_GPIO;
-        bus_config.scl_io_num = LCD_I2C_SCL_GPIO;
+        bus_config.sda_io_num = OLED_I2C_SDA_GPIO;
+        bus_config.scl_io_num = OLED_I2C_SCL_GPIO;
         bus_config.clk_source = I2C_CLK_SRC_DEFAULT;
         bus_config.glitch_ignore_cnt = 7;
         bus_config.flags.enable_internal_pullup = true;
@@ -61,10 +60,11 @@ private:
 
     void InitializeOledDisplay() {
 
+        // I2C communication configuration
         esp_lcd_panel_io_i2c_config_t io_config = {};
 
-        io_config.dev_addr = 0x3C;
-        io_config.scl_speed_hz = 400000;
+        io_config.dev_addr = OLED_I2C_ADDRESS;
+        io_config.scl_speed_hz = 400 * 1000;
         io_config.control_phase_bytes = 1;
         io_config.dc_bit_offset = 6;
         io_config.lcd_cmd_bits = 8;
@@ -80,16 +80,15 @@ private:
 
         ESP_LOGI(TAG, "Installing SH1106 driver");
 
+        // SH1106 panel configuration
         esp_lcd_panel_dev_config_t panel_config = {};
 
         panel_config.reset_gpio_num = GPIO_NUM_NC;
         panel_config.bits_per_pixel = 1;
 
-        esp_lcd_panel_ssd1306_config_t oled_config = {
-            .height = OLED_HEIGHT
-        };
+        esp_lcd_panel_sh1106_config_t sh1106_config = {};
 
-        panel_config.vendor_config = &oled_config;
+        panel_config.vendor_config = &sh1106_config;
 
         ESP_ERROR_CHECK(
             esp_lcd_new_panel_sh1106(
@@ -99,27 +98,45 @@ private:
             )
         );
 
+        ESP_LOGI(TAG, "SH1106 driver installed");
+
         // Reset OLED
         ESP_ERROR_CHECK(
             esp_lcd_panel_reset(panel_)
         );
 
         // Initialize OLED
-        ESP_ERROR_CHECK(
-            esp_lcd_panel_init(panel_)
-        );
+        esp_err_t init_result = esp_lcd_panel_init(panel_);
+
+        if (init_result != ESP_OK) {
+
+            ESP_LOGE(
+                TAG,
+                "Failed to initialize SH1106 OLED: %s",
+                esp_err_to_name(init_result)
+            );
+
+            display_ = new NoDisplay();
+            return;
+        }
 
         // Normal display
         ESP_ERROR_CHECK(
-            esp_lcd_panel_invert_color(panel_, false)
+            esp_lcd_panel_invert_color(
+                panel_,
+                false
+            )
         );
 
-        // Turn display on
+        // Turn OLED ON
         ESP_ERROR_CHECK(
-            esp_lcd_panel_disp_on_off(panel_, true)
+            esp_lcd_panel_disp_on_off(
+                panel_,
+                true
+            )
         );
 
-        // Connect OLED to XiaoZhi Display system
+        // Connect OLED to XiaoZhi display system
         display_ = new OledDisplay(
             panel_io_,
             panel_,
@@ -129,7 +146,7 @@ private:
             false
         );
 
-        ESP_LOGI(TAG, "SH1106 OLED ready");
+        ESP_LOGI(TAG, "Athena SH1106 OLED ready");
     }
 
     // =====================================================
@@ -137,16 +154,20 @@ private:
     // =====================================================
 
     void InitializeButtons() {
+
         boot_button_.OnClick([this]() {
 
             auto& app = Application::GetInstance();
 
             if (app.GetDeviceState() == kDeviceStateStarting) {
+
                 EnterWifiConfigMode();
                 return;
+
             }
 
             app.ToggleChatState();
+
         });
     }
 
@@ -155,7 +176,9 @@ private:
     // =====================================================
 
     void InitializeTools() {
+
         static LampController lamp(LAMP_GPIO);
+
     }
 
 public:
@@ -177,12 +200,14 @@ public:
     // =====================================================
 
     virtual Led* GetLed() override {
+
         static SingleLed led(BUILTIN_LED_GPIO);
+
         return &led;
     }
 
     // =====================================================
-    // AUDIO - DIPERTAHANKAN
+    // AUDIO - TIDAK DIUBAH
     // =====================================================
 
     virtual AudioCodec* GetAudioCodec() override {
@@ -224,12 +249,15 @@ public:
     // =====================================================
 
     virtual Display* GetDisplay() override {
+
         return display_;
     }
 
     virtual Backlight* GetBacklight() override {
+
         return nullptr;
     }
+
 };
 
 DECLARE_BOARD(CompactWifiBoardLCD);
